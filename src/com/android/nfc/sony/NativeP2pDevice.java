@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.android.nfc.dhimpl;
+package com.android.nfc.sony;
 
 import com.android.nfc.DeviceHost.NfcDepEndpoint;
 

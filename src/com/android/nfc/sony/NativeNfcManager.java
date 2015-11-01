@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.android.nfc.dhimpl;
+package com.android.nfc.sony;
 
 import com.android.nfc.DeviceHost;
 import com.android.nfc.LlcpException;
@@ -40,7 +40,6 @@ public class NativeNfcManager implements DeviceHost {
 
     static final String PREF = "NxpDeviceHost";
 
-
     static final String DRIVER_NAME = "sony";
 
     public static final String INTERNAL_TARGET_DESELECTED_ACTION = "com.android.nfc.action.INTERNAL_TARGET_DESELECTED";
@@ -62,7 +61,7 @@ public class NativeNfcManager implements DeviceHost {
     };
 
     static {
-        System.loadLibrary("nfc_sony_jni");
+        System.loadLibrary("nfc_jni");
     }
 
     /* Native structure */
