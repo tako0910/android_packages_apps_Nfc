@@ -62,11 +62,9 @@ import android.os.PowerManager;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
-import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.Settings;
-import android.text.TextUtils;
 import android.util.Log;
 
 import com.android.nfc.DeviceHost.DeviceHostListener;
@@ -76,7 +74,7 @@ import com.android.nfc.DeviceHost.LlcpSocket;
 import com.android.nfc.DeviceHost.NfcDepEndpoint;
 import com.android.nfc.DeviceHost.TagEndpoint;
 import com.android.nfc.cardemulation.CardEmulationManager;
-import com.android.nfc.sony.NativeNfcManager;
+import com.android.nfc.dhimpl.NativeNfcManager;
 import com.android.nfc.handover.HandoverDataParser;
 
 import java.io.FileDescriptor;
@@ -437,15 +435,6 @@ public class NfcService implements DeviceHostListener {
         }
     }
 
-    boolean isSecHal() {
-        String nfcSecHal = SystemProperties.get("ro.nfc.sec_hal");
-        if (!TextUtils.isEmpty(nfcSecHal)) {
-            Log.i(TAG, "This device uses SEC NFC CHIP.");
-            return true;
-        }
-        return false;
-    }
-
     /**
      * Manages tasks that involve turning on/off the NFC controller.
      * <p/>
@@ -508,7 +497,7 @@ public class NfcService implements DeviceHostListener {
                             (!mIsAirplaneSensitive || !isAirplaneModeOn() || airplaneOverride)) {
                         Log.d(TAG, "NFC is on. Doing normal stuff");
                         enableInternal();
-                    } else if (!isSecHal()) {
+                    } else {
                         Log.d(TAG, "NFC is off.  Checking firmware version");
                         mDeviceHost.checkFirmware();
                     }
