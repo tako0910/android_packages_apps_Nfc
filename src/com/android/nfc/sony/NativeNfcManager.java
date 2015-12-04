@@ -62,7 +62,7 @@ public class NativeNfcManager implements DeviceHost {
     };
 
     static {
-        System.loadLibrary("nfc_sony_jni");
+        System.loadLibrary("nfc_jni");
     }
 
     /* Native structure */
