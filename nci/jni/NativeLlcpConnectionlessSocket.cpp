@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-#include <semaphore.h>
 #include <errno.h>
+#include <malloc.h>
+#include <semaphore.h>
+#include <string.h>
 #include "OverrideLog.h"
 #include "NfcJniUtil.h"
 #include "JavaClassConstants.h"
@@ -72,7 +74,7 @@ static jboolean nativeLlcpConnectionlessSocket_doSendTo (JNIEnv *e, jobject o, j
     }
     size_t byte_count = bytes.size();
 
-    ALOGD("NFA_P2pSendUI: len = %d", byte_count);
+    ALOGD("NFA_P2pSendUI: len = %zu", byte_count);
     UINT8* raw_ptr = const_cast<UINT8*>(reinterpret_cast<const UINT8*>(&bytes[0])); // TODO: API bug; NFA_P2pSendUI should take const*!
     tNFA_STATUS status = NFA_P2pSendUI((tNFA_HANDLE) handle, nsap, byte_count, raw_ptr);
 

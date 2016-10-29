@@ -16,9 +16,13 @@
 
 package com.android.nfc;
 
-import android.nfc.INfcUnlockHandler;
+import android.app.ActivityManager;
+import android.bluetooth.BluetoothAdapter;
+import android.os.UserManager;
+
 import com.android.nfc.RegisteredComponentCache.ComponentInfo;
-import com.android.nfc.handover.HandoverManager;
+import com.android.nfc.handover.HandoverDataParser;
+import com.android.nfc.handover.PeripheralHandoverService;
 
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -41,6 +45,7 @@ import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
 import android.nfc.tech.Ndef;
+import android.nfc.tech.NfcBarcode;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.util.Log;
@@ -50,7 +55,6 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -69,10 +73,11 @@ class NfcDispatcher {
     private final IActivityManager mIActivityManager;
     private final RegisteredComponentCache mTechListFilters;
     private final ContentResolver mContentResolver;
-    private final HandoverManager mHandoverManager;
+    private final HandoverDataParser mHandoverDataParser;
     private final String[] mProvisioningMimes;
     private final ScreenStateHelper mScreenStateHelper;
     private final NfcUnlockManager mNfcUnlockManager;
+    private final boolean mDeviceSupportsBluetooth;
 
     // Locked on this
     private PendingIntent mOverrideIntent;
@@ -81,16 +86,17 @@ class NfcDispatcher {
     private boolean mProvisioningOnly;
 
     NfcDispatcher(Context context,
-                  HandoverManager handoverManager,
+                  HandoverDataParser handoverDataParser,
                   boolean provisionOnly) {
         mContext = context;
         mIActivityManager = ActivityManagerNative.getDefault();
         mTechListFilters = new RegisteredComponentCache(mContext,
                 NfcAdapter.ACTION_TECH_DISCOVERED, NfcAdapter.ACTION_TECH_DISCOVERED);
         mContentResolver = context.getContentResolver();
-        mHandoverManager = handoverManager;
+        mHandoverDataParser = handoverDataParser;
         mScreenStateHelper = new ScreenStateHelper(context);
         mNfcUnlockManager = NfcUnlockManager.getInstance();
+        mDeviceSupportsBluetooth = BluetoothAdapter.getDefaultAdapter() != null;
 
         synchronized (this) {
             mProvisioningOnly = provisionOnly;
@@ -224,6 +230,7 @@ class NfcDispatcher {
         PendingIntent overrideIntent;
         IntentFilter[] overrideFilters;
         String[][] overrideTechLists;
+        String[] provisioningMimes;
         boolean provisioningOnly;
 
         synchronized (this) {
@@ -231,6 +238,7 @@ class NfcDispatcher {
             overrideIntent = mOverrideIntent;
             overrideTechLists = mOverrideTechLists;
             provisioningOnly = mProvisioningOnly;
+            provisioningMimes = mProvisioningMimes;
         }
 
         boolean screenUnlocked = false;
@@ -246,6 +254,11 @@ class NfcDispatcher {
         Ndef ndef = Ndef.get(tag);
         if (ndef != null) {
             message = ndef.getCachedNdefMessage();
+        } else {
+            NfcBarcode nfcBarcode = NfcBarcode.get(tag);
+            if (nfcBarcode != null && nfcBarcode.getType() == NfcBarcode.TYPE_KOVIO) {
+                message = decodeNfcBarcodeUri(nfcBarcode);
+            }
         }
 
         if (DBG) Log.d(TAG, "dispatch tag: " + tag.toString() + " message: " + message);
@@ -259,7 +272,7 @@ class NfcDispatcher {
             return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
         }
 
-        if (mHandoverManager.tryHandover(message)) {
+        if (tryPeripheralHandover(message)) {
             if (DBG) Log.i(TAG, "matched BT HANDOVER");
             return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
         }
@@ -269,18 +282,27 @@ class NfcDispatcher {
             return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
         }
 
-        if (tryNdef(dispatch, message, provisioningOnly)) {
+        if (provisioningOnly) {
+            if (message == null) {
+                // We only allow NDEF-message dispatch in provisioning mode
+                return DISPATCH_FAIL;
+            }
+            // Restrict to mime-types in whitelist.
+            String ndefMimeType = message.getRecords()[0].toMimeType();
+            if (provisioningMimes == null ||
+                    !(Arrays.asList(provisioningMimes).contains(ndefMimeType))) {
+                Log.e(TAG, "Dropping NFC intent in provisioning mode.");
+                return DISPATCH_FAIL;
+            }
+        }
+
+        if (tryNdef(dispatch, message)) {
             return screenUnlocked ? DISPATCH_UNLOCK : DISPATCH_SUCCESS;
         }
 
         if (screenUnlocked) {
             // We only allow NDEF-based mimeType matching in case of an unlock
             return DISPATCH_UNLOCK;
-        }
-
-        if (provisioningOnly) {
-            // We only allow NDEF-based mimeType matching
-            return DISPATCH_FAIL;
         }
 
         // Only allow NDEF-based mimeType matching for unlock tags
@@ -300,6 +322,69 @@ class NfcDispatcher {
 
     private boolean handleNfcUnlock(Tag tag) {
         return mNfcUnlockManager.tryUnlock(tag);
+    }
+
+    /**
+     * Checks for the presence of a URL stored in a tag with tech NfcBarcode.
+     * If found, decodes URL and returns NdefMessage message containing an
+     * NdefRecord containing the decoded URL. If not found, returns null.
+     *
+     * URLs are decoded as follows:
+     *
+     * Ignore first byte (which is 0x80 ORd with a manufacturer ID, corresponding
+     * to ISO/IEC 7816-6).
+     * The second byte describes the payload data format. There are four defined data
+     * format values that identify URL data. Depending on the data format value, the
+     * associated prefix is appended to the URL data:
+     *
+     * 0x01: URL with "http://www." prefix
+     * 0x02: URL with "https://www." prefix
+     * 0x03: URL with "http://" prefix
+     * 0x04: URL with "https://" prefix
+     *
+     * Other data format values do not identify URL data and are not handled by this function.
+     * URL payload is encoded in US-ASCII, following the limitations defined in RFC3987.
+     * see http://www.ietf.org/rfc/rfc3987.txt
+     *
+     * The final two bytes of a tag with tech NfcBarcode are always reserved for CRC data,
+     * and are therefore not part of the payload. They are ignored in the decoding of a URL.
+     *
+     * The default assumption is that the URL occupies the entire payload of the NfcBarcode
+     * ID and all bytes of the NfcBarcode payload are decoded until the CRC (final two bytes)
+     * is reached. However, the OPTIONAL early terminator byte 0xfe can be used to signal
+     * an early end of the URL. Once this function reaches an early terminator byte 0xfe,
+     * URL decoding stops and the NdefMessage is created and returned. Any payload data after
+     * the first early terminator byte is ignored for the purposes of URL decoding.
+     */
+    private NdefMessage decodeNfcBarcodeUri(NfcBarcode nfcBarcode) {
+        final byte URI_PREFIX_HTTP_WWW  = (byte) 0x01; // "http://www."
+        final byte URI_PREFIX_HTTPS_WWW = (byte) 0x02; // "https://www."
+        final byte URI_PREFIX_HTTP      = (byte) 0x03; // "http://"
+        final byte URI_PREFIX_HTTPS     = (byte) 0x04; // "https://"
+
+        NdefMessage message = null;
+        byte[] tagId = nfcBarcode.getTag().getId();
+        // All tags of NfcBarcode technology and Kovio type have lengths of a multiple of 16 bytes
+        if (tagId.length >= 4
+                && (tagId[1] == URI_PREFIX_HTTP_WWW || tagId[1] == URI_PREFIX_HTTPS_WWW
+                    || tagId[1] == URI_PREFIX_HTTP || tagId[1] == URI_PREFIX_HTTPS)) {
+            // Look for optional URI terminator (0xfe), used to indicate the end of a URI prior to
+            // the end of the full NfcBarcode payload. No terminator means that the URI occupies the
+            // entire length of the payload field. Exclude checking the CRC in the final two bytes
+            // of the NfcBarcode tagId.
+            int end = 2;
+            for (; end < tagId.length - 2; end++) {
+                if (tagId[end] == (byte) 0xfe) {
+                    break;
+                }
+            }
+            byte[] payload = new byte[end - 1]; // Skip also first byte (manufacturer ID)
+            System.arraycopy(tagId, 1, payload, 0, payload.length);
+            NdefRecord uriRecord = new NdefRecord(
+                    NdefRecord.TNF_WELL_KNOWN, NdefRecord.RTD_URI, tagId, payload);
+            message = new NdefMessage(uriRecord);
+        }
+        return message;
     }
 
     boolean tryOverrides(DispatchInfo dispatch, Tag tag, NdefMessage message, PendingIntent overrideIntent,
@@ -378,7 +463,7 @@ class NfcDispatcher {
         return false;
     }
 
-    boolean tryNdef(DispatchInfo dispatch, NdefMessage message, boolean provisioningOnly) {
+    boolean tryNdef(DispatchInfo dispatch, NdefMessage message) {
         if (message == null) {
             return false;
         }
@@ -386,14 +471,6 @@ class NfcDispatcher {
 
         // Bail out if the intent does not contain filterable NDEF data
         if (intent == null) return false;
-
-        if (provisioningOnly) {
-            if (mProvisioningMimes == null ||
-                    !(Arrays.asList(mProvisioningMimes).contains(intent.getType()))) {
-                Log.e(TAG, "Dropping NFC intent in provisioning mode.");
-                return false;
-            }
-        }
 
         // Try to start AAR activity with matching filter
         List<String> aarPackages = extractAarPackages(message);
@@ -504,6 +581,33 @@ class NfcDispatcher {
         }
         return false;
     }
+
+    public boolean tryPeripheralHandover(NdefMessage m) {
+        if (m == null || !mDeviceSupportsBluetooth) return false;
+
+        if (DBG) Log.d(TAG, "tryHandover(): " + m.toString());
+
+        HandoverDataParser.BluetoothHandoverData handover = mHandoverDataParser.parseBluetooth(m);
+        if (handover == null || !handover.valid) return false;
+        if (UserManager.get(mContext).hasUserRestriction(
+                UserManager.DISALLOW_CONFIG_BLUETOOTH,
+                // hasUserRestriction does not support UserHandle.CURRENT
+                UserHandle.of(ActivityManager.getCurrentUser()))) {
+            return false;
+        }
+
+        Intent intent = new Intent(mContext, PeripheralHandoverService.class);
+        intent.putExtra(PeripheralHandoverService.EXTRA_PERIPHERAL_DEVICE, handover.device);
+        intent.putExtra(PeripheralHandoverService.EXTRA_PERIPHERAL_NAME, handover.name);
+        intent.putExtra(PeripheralHandoverService.EXTRA_PERIPHERAL_TRANSPORT, handover.transport);
+        if (handover.oobData != null) {
+            intent.putExtra(PeripheralHandoverService.EXTRA_PERIPHERAL_OOB_DATA, handover.oobData);
+        }
+        mContext.startServiceAsUser(intent, UserHandle.CURRENT);
+
+        return true;
+    }
+
 
     /**
      * Tells the ActivityManager to resume allowing app switches.

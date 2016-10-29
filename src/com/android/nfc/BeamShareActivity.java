@@ -32,6 +32,7 @@ import android.nfc.NdefMessage;
 import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
 import android.os.Bundle;
+import android.os.UserHandle;
 import android.util.Log;
 import android.webkit.URLUtil;
 
@@ -75,10 +76,19 @@ public class BeamShareActivity extends Activity {
         }
     }
 
+    @Override
+    protected void onDestroy() {
+        try {
+            unregisterReceiver(mReceiver);
+        } catch (Exception e) {
+            Log.w(TAG, e.getMessage());
+        }
+        super.onDestroy();
+    }
 
     private void showNfcDialogAndExit(int msgId) {
         IntentFilter filter = new IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED);
-        registerReceiver(mReceiver, filter);
+        registerReceiverAsUser(mReceiver, UserHandle.ALL, filter, null, null);
 
         AlertDialog.Builder dialogBuilder = new AlertDialog.Builder(this,
                 AlertDialog.THEME_DEVICE_DEFAULT_LIGHT);
@@ -142,7 +152,13 @@ public class BeamShareActivity extends Activity {
                 ClipData.Item item = clipData.getItemAt(i);
                 // First try to get an Uri
                 Uri uri = item.getUri();
-                String plainText = item.coerceToText(this).toString();
+                String plainText = null;
+                try {
+                    plainText = item.coerceToText(this).toString();
+                } catch (IllegalStateException e) {
+                    if (DBG) Log.d(TAG, e.getMessage());
+                    continue;
+                }
                 if (uri != null) {
                     if (DBG) Log.d(TAG, "Found uri in ClipData.");
                     tryUri(uri);
@@ -188,6 +204,7 @@ public class BeamShareActivity extends Activity {
         }
 
         BeamShareData shareData = null;
+        UserHandle myUserHandle = new UserHandle(UserHandle.myUserId());
         if (mUris.size() > 0) {
             // Uris have our first preference for sharing
             Uri[] uriArray = new Uri[mUris.size()];
@@ -204,18 +221,18 @@ public class BeamShareActivity extends Activity {
                 }
             }
             if (numValidUris > 0) {
-                shareData = new BeamShareData(null, uriArray, 0);
+                shareData = new BeamShareData(null, uriArray, myUserHandle, 0);
             } else {
                 // No uris left
-                shareData = new BeamShareData(null, null, 0);
+                shareData = new BeamShareData(null, null, myUserHandle, 0);
             }
         } else if (mNdefMessage != null) {
-            shareData = new BeamShareData(mNdefMessage, null, 0);
+            shareData = new BeamShareData(mNdefMessage, null, myUserHandle, 0);
             if (DBG) Log.d(TAG, "Created NDEF message:" + mNdefMessage.toString());
         } else {
             if (DBG) Log.d(TAG, "Could not find any data to parse.");
             // Activity may have set something to share over NFC, so pass on anyway
-            shareData = new BeamShareData(null, null, 0);
+            shareData = new BeamShareData(null, null, myUserHandle, 0);
         }
         mNfcAdapter.invokeBeam(shareData);
         finish();
