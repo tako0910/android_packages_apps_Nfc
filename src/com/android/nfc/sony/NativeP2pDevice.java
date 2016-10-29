@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.android.nfc.dhimpl;
+package com.android.nfc.sony;
 
 import com.android.nfc.DeviceHost.NfcDepEndpoint;
 
@@ -26,6 +26,8 @@ public class NativeP2pDevice implements NfcDepEndpoint {
     private int mHandle;
 
     private int mMode;
+
+    private byte mLlcpVersion;
 
     private byte[] mGeneralBytes;
 
@@ -73,4 +75,8 @@ public class NativeP2pDevice implements NfcDepEndpoint {
         return mGeneralBytes;
     }
 
+    @Override
+    public byte getLlcpVersion() {
+        return mLlcpVersion;
+    }
 }

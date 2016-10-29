@@ -82,7 +82,7 @@ import com.android.nfc.DeviceHost.LlcpSocket;
 import com.android.nfc.DeviceHost.NfcDepEndpoint;
 import com.android.nfc.DeviceHost.TagEndpoint;
 import com.android.nfc.cardemulation.CardEmulationManager;
-import com.android.nfc.dhimpl.NativeNfcManager;
+import com.android.nfc.sony.NativeNfcManager;
 import com.android.nfc.handover.HandoverDataParser;
 
 import java.io.FileDescriptor;

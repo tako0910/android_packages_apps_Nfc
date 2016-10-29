@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.android.nfc.dhimpl;
+package com.android.nfc.sony;
 
 import com.android.nfc.DeviceHost;
 import com.android.nfc.DeviceHost.LlcpSocket;
@@ -32,7 +32,6 @@ public class NativeLlcpServiceSocket implements DeviceHost.LlcpServerSocket {
     private int mLocalLinearBufferLength;
     private int mSap;
     private String mServiceName;
-    private boolean mDeadFlag = false;
 
     public NativeLlcpServiceSocket(){ }
 
@@ -47,7 +46,6 @@ public class NativeLlcpServiceSocket implements DeviceHost.LlcpServerSocket {
     private native boolean doClose();
     @Override
     public void close() throws IOException {
-        mDeadFlag = true;
         if (!doClose()) {
             throw new IOException();
         }
