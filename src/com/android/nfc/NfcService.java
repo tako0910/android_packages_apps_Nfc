@@ -463,7 +463,7 @@ public class NfcService implements DeviceHostListener {
             mInstalledPackages = packages;
         }
     }
-
+/*
     boolean isSecHal() {
         String nfcSecHal = SystemProperties.get("ro.nfc.sec_hal");
         if (!TextUtils.isEmpty(nfcSecHal)) {
@@ -472,7 +472,7 @@ public class NfcService implements DeviceHostListener {
         }
         return false;
     }
-
+*/
     /**
      * Manages tasks that involve turning on/off the NFC controller.
      * <p/>
@@ -533,9 +533,11 @@ public class NfcService implements DeviceHostListener {
                     if (mPrefs.getBoolean(PREF_NFC_ON, NFC_ON_DEFAULT)) {
                         Log.d(TAG, "NFC is on. Doing normal stuff");
                         enableInternal();
+/*
                     } else if (!isSecHal()) {
                         Log.d(TAG, "NFC is off.  Checking firmware version");
                         mDeviceHost.checkFirmware();
+*/
                     }
                     if (mPrefs.getBoolean(PREF_FIRST_BOOT, true)) {
                         Log.i(TAG, "First Boot");
