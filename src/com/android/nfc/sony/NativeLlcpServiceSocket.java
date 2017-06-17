@@ -32,6 +32,7 @@ public class NativeLlcpServiceSocket implements DeviceHost.LlcpServerSocket {
     private int mLocalLinearBufferLength;
     private int mSap;
     private String mServiceName;
+    private boolean mDeadFlag;
 
     public NativeLlcpServiceSocket(){ }
 
